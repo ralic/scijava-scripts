@@ -1,26 +1,34 @@
 #!/bin/sh
 
-# Script to print version properties for a given pom-scijava release.
+# Script to print version properties for a given parent POM release.
+
+use strict;
 
 # Examples:
-# sj-version.sh 1.70
-# sj-version.sh 1.70 1.74
+# sj-version.pl 1.70
+# sj-version.pl 1.70 1.74
+# sj-version.pl imagej:2.7 imagej:2.1
+# sj-version.pl org.scijava:pom-scijava:2.1
 
-version="$1"
-diff="$2"
+my $version = $1;
+my $diff = $2;
 
-repo="http://maven.imagej.net/content/groups/public"
+my $repo = "http://maven.imagej.net/content/groups/public";
 
-props() {
-	if [ -e "$1" ]
-	then
+sub props($) {
+	my ($arg) = @_;
+
+	if (-f "$arg") {
 		# extract version properties from the given file path
-		versions=$(cat "$1")
-	else
+		open POM, $arg;
+		my $versions = <POM>;
+		close(POM);
+	}
+	else {
 		url="$repo/org/scijava/pom-scijava/$1/pom-scijava-$1.pom"
 		versions=$(curl -s "$url")
 		# assume argument is a version number of pom-scijava
-	fi
+	}
 	echo "$versions" | \
 		grep '\.version>' | \
 		sed -E -e 's/^				(.*)/\1 [DEV]/' | \
@@ -33,10 +41,19 @@ then
 	# try to extract version from pom.xml in this directory
 	if [ -e pom.xml ]
 	then
-		version=$(grep -A 1 pom-scijava pom.xml | \
+		groupId=$(grep -A 3 '<parent>' pom.xml | \
+			grep '<groupId>' | \
+			sed 's/<\/.*//' | \
+			sed 's/.*>//')
+		artifactId=$(grep -A 3 '<parent>' pom.xml | \
+			grep '<artifactId>' | \
+			sed 's/<\/.*//' | \
+			sed 's/.*>//')
+		version=$(grep -A 3 '<parent>' pom.xml | \
 			grep '<version>' | \
 			sed 's/<\/.*//' | \
 			sed 's/.*>//')
+		version="$groupId:$artifactId:$version"
 	fi
 fi
 
