@@ -152,19 +152,27 @@ jar_url () {
 	artifactId="$(artifactId "$gav")"
 	version="$(version "$gav")"
 	infix="$(groupId "$gav" | tr . /)/$artifactId/$version"
-	case "$version" in
-	*-SNAPSHOT)
-		url="$(root_url $infix snapshots)/$infix/maven-metadata.xml"
-		metadata="$(curl -s "$url")"
-		timestamp="$(extract_tag timestamp "$metadata")"
-		buildNumber="$(extract_tag buildNumber "$metadata")"
-		version=${version%-SNAPSHOT}-$timestamp-$buildNumber
-		echo "$(root_url $infix snapshots)/$infix/$artifactId-$version.jar"
-		;;
-	*)
-		echo "$(root_url $infix releases)/$infix/$artifactId-$version.jar"
-		;;
-	esac
+
+	cached=$HOME/.m2/repository/$infix/
+
+	if test -d "$cached"
+	then
+		echo "$cached$artifactId-$version.jar"
+	else
+		case "$version" in
+		*-SNAPSHOT)
+			url="$(root_url $infix snapshots)/$infix/maven-metadata.xml"
+			metadata="$(curl -s "$url")"
+			timestamp="$(extract_tag timestamp "$metadata")"
+			buildNumber="$(extract_tag buildNumber "$metadata")"
+			version=${version%-SNAPSHOT}-$timestamp-$buildNumber
+			echo "$(root_url $infix snapshots)/$infix/$artifactId-$version.jar"
+			;;
+		*)
+			echo "$(root_url $infix releases)/$infix/$artifactId-$version.jar"
+			;;
+		esac
+	fi
 }
 
 # Given a GAV parameter, return the URL to the corresponding .pom file
@@ -274,7 +282,15 @@ read_pom () {
 		cat "$1"
 		;;
 	*)
-		curl -s "$(pom_url "$1")"
+		url=$(pom_url "$1")
+		case "$url" in
+		http*)
+			curl -s "$url"
+			;;
+		*)
+			cat "$url"
+			;;
+		esac
 		;;
 	esac
 }
