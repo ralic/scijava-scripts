@@ -112,11 +112,13 @@ skip_tag () {
 parent_gav_from_pom_xml () {
 	pom="$1"
 	parent="$(extract_tag parent "$pom")"
-	test -n "$parent" || return
-	groupId="$(extract_tag groupId "$parent")"
-	artifactId="$(extract_tag artifactId "$parent")"
-	version="$(extract_tag version "$parent")"
-	echo "$groupId:$artifactId:$version"
+	if test -n "$parent"
+	then
+		groupId="$(extract_tag groupId "$parent")"
+		artifactId="$(extract_tag artifactId "$parent")"
+		version="$(extract_tag version "$parent")"
+		echo "$groupId:$artifactId:$version"
+	fi
 }
 
 # Given a GAV parameter, determine the base URL of the project
@@ -357,7 +359,24 @@ expand () {
 # Given a GAV parameter, make a list of its dependencies (as GAV parameters)
 
 get_dependencies () {
-	pom="$(read_pom "$1")"
+	get_dependencies_helper "$(read_pom "$1")"
+}
+
+# Gets dependencies from the pom created by "mvn help:effective-pom"
+# in the current working directory
+
+get_effective_dependencies () {
+	get_dependencies_helper "$(mvn help:effective-pom)"
+}
+
+# Helper method to perform actual dependency parsing
+
+# TODO iterate through parents to expand ${}, either in properties or
+# dependency management
+# TODO restrict to just core dependency
+
+get_dependencies_helper () {
+	pom=$1
 	while true
 	do
 		case "$pom" in
@@ -477,6 +496,67 @@ is_deployed () {
 	 git diff --quiet "$commit".. -- .)
 }
 
+# Fails with exit code 1 if the given gav contains SNAPSHOT
+
+test_snapshot () {
+	if [[ "$1" == *"SNAPSHOT"* ]]
+	then
+		echo "Found SNAPSHOT: $1"
+		exit 1
+	fi
+}
+
+# Test all parents of the given pom.xml for SNAPSHOT versions
+
+validate_parent () {
+	parent="$(parent_gav "$1")"
+	return
+#	while [[ "$parent" != "$NO_PARENT" ]]
+#		do
+#			test_snapshot "$parent"
+#			parent="$(parent_gav "$parent")"
+#		done
+}
+
+# Recursively test all parents and dependencies of the
+# given gav for SNAPSHOT versions
+
+validate_gav () {
+	# Test the gav itself
+	test_snapshot "$1"
+
+	# Test the gav's parents
+	validate_parent "$1"
+
+	# Test the gav's dependencies
+	deps="$(get_dependencies $1)"
+	for dep in $deps
+	do
+		echo "sub validating: $dep"
+		validate_gav "$dep"
+	done
+}
+
+# Determine whether the pom.xml in the cwd has any trace of SNAPSHOTS
+
+validate_no_snapshots () {
+	basegav="$(gav_from_pom pom.xml)"
+
+	# Fail if the current pom is a snapshot
+	test_snapshot "$basegav"
+
+	# Test the base pom's parent
+	validate_parent "$basegav"
+
+	# Test the effective dependencies and their parents
+	deps="$(get_effective_dependencies)"
+	for dep in $deps
+	do
+		echo "top-level validating: $dep"
+		validate_gav "$dep"
+	done
+}
+
 # Determine which function to call
 
 process_args() {
@@ -527,6 +607,9 @@ process_args() {
 	is-deployed)
 		is_deployed "$2"
 		;;
+	validate-no-snapshots)
+		validate_no_snapshots
+		;;
 	*)
 		test $# -eq 0 || echo "Unknown command: $1" >&2
 		die "Usage: $0 [option...] [command] [argument...]"'
@@ -559,7 +642,8 @@ process_args() {
 			credentials in $HOME/.netrc for http://maven.imagej.net/.
 
 		parent-gav <groupId>:<artifactId>[:<version>]
-			Prints the GAV parameter of the parent project of the given artifact.
+			Prints the GAV parameter of the parent project of the given artifact,
+			or "no parent found" if the given gav has no parent.
 
 		pom-url <groupId>:<artifactId>:<version>
 			Gets the URL of the POM describing the given artifact.
@@ -568,7 +652,8 @@ process_args() {
 			Prints the GAV parameter described in the given pom.xml file.
 
 		parent-gav-from-pom <pom.xml>
-			Prints the GAV parameter of the parent project of the pom.xml file.
+			Prints the GAV parameter of the parent project of the pom.xml file, or
+			"no parent found" if the given pom has no parent.
 
 		packaging-from-pom <pom.xml>
 			Prints the packaging type of the given project.
@@ -585,6 +670,13 @@ process_args() {
 		is-deployed <pom.xml>
 			Tests whether the specified project is deployed alright. Fails
 			with exit code 1 if not.
+
+		validate-no-snapshots
+			Tests whether the pom in the current working directory specifies any
+			SNAPSHOT dependencies, contains a SNAPSHOT parent pom in its hierarchy,
+			or has a dependency with a SNAPSHOT parent pom in its hierarchy. This
+			is a recursive test and is more thorough than the maven enforcer
+			no-snapshot rule. Fails with exit code 1 if a SNAPSHOT is found.
 		'
 		;;
 	esac
