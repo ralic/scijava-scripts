@@ -5,6 +5,7 @@
 
 # error out whenever a command fails
 set -e
+local=false
 
 root_url () {
 	test snapshots != "$2" || {
@@ -155,7 +156,7 @@ jar_url () {
 
 	cached=$HOME/.m2/repository/$infix/
 
-	if test -d "$cached"
+	if $local && test -d "$cached"
 	then
 		echo "$cached$artifactId-$version.jar"
 	else
@@ -476,108 +477,132 @@ is_deployed () {
 	 git diff --quiet "$commit".. -- .)
 }
 
-# The main part
+# Determine which function to call
 
-case "$1" in
-commit)
-	commit_from_gav "$2"
-	;;
-deps|dependencies)
-	get_dependencies "$2"
-	;;
-all-deps|all-dependencies)
-	get_all_dependencies "$2" |
-	tr ' ' '\n' |
-	grep -v '^$'
-	;;
-latest-version)
-	latest_version "$2"
-	;;
-invalidate-cache)
-	invalidate_cache "$2"
-	;;
-gav-from-pom)
-	gav_from_pom "$2"
-	;;
-parent-gav)
-	parent_gav "$2"
-	;;
-pom-url)
-	pom_url "$2"
-	;;
-parent-gav-from-pom)
-	parent_gav_from_pom "$2"
-	;;
-packaging-from-pom)
-	packaging_from_pom "$2"
-	;;
-property-from-pom|get-property|property)
-	if test $# -lt 3
-	then
-		get_property pom.xml "$2"
-	else
-		get_property "$2" "$3"
-	fi
-	;;
-install)
-	install_jar "$2"
-	;;
-is-deployed)
-	is_deployed "$2"
-	;;
-*)
-	test $# -eq 0 || echo "Unknown command: $1" >&2
-	die "Usage: $0 [command] [argument...]"'
+process_args() {
+	case "$1" in
+	commit)
+		commit_from_gav "$2"
+		;;
+	deps|dependencies)
+		get_dependencies "$2"
+		;;
+	all-deps|all-dependencies)
+		get_all_dependencies "$2" |
+		tr ' ' '\n' |
+		grep -v '^$'
+		;;
+	latest-version)
+		latest_version "$2"
+		;;
+	invalidate-cache)
+		invalidate_cache "$2"
+		;;
+	gav-from-pom)
+		gav_from_pom "$2"
+		;;
+	parent-gav)
+		parent_gav "$2"
+		;;
+	pom-url)
+		pom_url "$2"
+		;;
+	parent-gav-from-pom)
+		parent_gav_from_pom "$2"
+		;;
+	packaging-from-pom)
+		packaging_from_pom "$2"
+		;;
+	property-from-pom|get-property|property)
+		if test $# -lt 3
+		then
+			get_property pom.xml "$2"
+		else
+			get_property "$2" "$3"
+		fi
+		;;
+	install)
+		install_jar "$2"
+		;;
+	is-deployed)
+		is_deployed "$2"
+		;;
+	*)
+		test $# -eq 0 || echo "Unknown command: $1" >&2
+		die "Usage: $0 [option...] [command] [argument...]"'
+		Options:
 
-Commands:
+		local
+			Causes commands to check the local maven cache before a remote
+			repository.
 
-commit <groupId>:<artifactId>:<version>
-	Gets the commit from which the given artifact was built.
+		Commands:
 
-dependencies <groupId>:<artifactId>:<version>
-	Lists the direct dependencies of the given artifact.
+		commit <groupId>:<artifactId>:<version>
+			Gets the commit from which the given artifact was built.
 
-all-dependencies <groupId>:<artifactId>:<version>
-	Lists all dependencies of the given artifact, including itself and
-	transitive dependencies.
+		dependencies <groupId>:<artifactId>:<version>
+			Lists the direct dependencies of the given artifact.
 
-latest-version <groupId>:<artifactId>[:<version>]
-	Prints the current version of the given artifact (if "SNAPSHOT" is
-	passed as version, it prints the current snapshot version rather
-	than the release one).
+		all-dependencies <groupId>:<artifactId>:<version>
+			Lists all dependencies of the given artifact, including itself and
+			transitive dependencies.
 
-invalidate-cache <groupId>:<artifactId>
-	Invalidates the version cached in the ImageJ Nexus from OSS Sonatype,
-	e.g. after releasing a new version to Sonatype. Requires appropriate
-	credentials in $HOME/.netrc for http://maven.imagej.net/.
+		latest-version <groupId>:<artifactId>[:<version>]
+			Prints the current version of the given artifact (if "SNAPSHOT" is
+			passed as version, it prints the current snapshot version rather
+			than the release one).
 
-parent-gav <groupId>:<artifactId>[:<version>]
-	Prints the GAV parameter of the parent project of the given artifact.
+		invalidate-cache <groupId>:<artifactId>
+			Invalidates the version cached in the ImageJ Nexus from OSS Sonatype,
+			e.g. after releasing a new version to Sonatype. Requires appropriate
+			credentials in $HOME/.netrc for http://maven.imagej.net/.
 
-pom-url <groupId>:<artifactId>:<version>
-	Gets the URL of the POM describing the given artifact.
+		parent-gav <groupId>:<artifactId>[:<version>]
+			Prints the GAV parameter of the parent project of the given artifact.
 
-gav-from-pom <pom.xml>
-	Prints the GAV parameter described in the given pom.xml file.
+		pom-url <groupId>:<artifactId>:<version>
+			Gets the URL of the POM describing the given artifact.
 
-parent-gav-from-pom <pom.xml>
-	Prints the GAV parameter of the parent project of the pom.xml file.
+		gav-from-pom <pom.xml>
+			Prints the GAV parameter described in the given pom.xml file.
 
-packaging-from-pom <pom.xml>
-	Prints the packaging type of the given project.
+		parent-gav-from-pom <pom.xml>
+			Prints the GAV parameter of the parent project of the pom.xml file.
 
-property-from-pom <pom.xml> <property-name>
-	Prints the property specified in the pom.xml file (or in its parents).
+		packaging-from-pom <pom.xml>
+			Prints the packaging type of the given project.
 
-install <groupId>:<artifactId>:<version>
-	Installs the given artifact and all its dependencies; if the artifact
-	or dependency to install is an ImageJ 1.x plugin and the parent
-	directory contains a subdirectory called "plugins", it will be
-	installed there, otherwise into the current directory.
+		property-from-pom <pom.xml> <property-name>
+			Prints the property specified in the pom.xml file (or in its parents).
 
-is-deployed <pom.xml>
-	Tests whether the specified project is deployed alright. Fails
-	with exit code 1 if not.
-'
-	;;
-esac
+		install <groupId>:<artifactId>:<version>
+			Installs the given artifact and all its dependencies; if the artifact
+			or dependency to install is an ImageJ 1.x plugin and the parent
+			directory contains a subdirectory called "plugins", it will be
+			installed there, otherwise into the current directory.
+
+		is-deployed <pom.xml>
+			Tests whether the specified project is deployed alright. Fails
+			with exit code 1 if not.
+		'
+		;;
+	esac
+}
+
+# Preprocess arguments, removing global flags
+
+ARGS=()
+for var in "$@"
+do
+	case "$var" in
+	local)
+		local=true
+		;;
+	*)
+		ARGS+=("$var")
+		;;
+	esac
+done
+
+process_args "${ARGS[@]}"
